@@ -20,7 +20,7 @@ func main() {
 	docs := map[int]string{
 		1:  "The quick brown fox jumps over the lazy dog",
 		2:  "The dog barked at the cat",
-		3:  "The cat chased the mouse",
+		3:  "The cat, cat chased the mouse",
 		4:  "The mouse ran away from the cat",
 		5:  "The cat caught the mouse",
 		6:  "The mouse escaped from the cat",
@@ -39,6 +39,8 @@ func main() {
 		tokens := tokenizer.Tokenize(text, filter)
 		idx.Add(id, tokens)
 	}
+
+	fmt.Println("index", idx.Index)
 
 	// QUERY
 	query := "cat mouse"
@@ -84,7 +86,7 @@ func printResults(query string, hits []searchHit) {
 	fmt.Println("\n================================================")
 }
 
-func printIndex(idx map[string]map[int]bool) {
+func printIndex(idx map[string]map[int]int) {
 	fmt.Println("\n================ INVERTED INDEX ================\n")
 
 	// Sort terms for deterministic output

@@ -6,18 +6,20 @@ import (
 	"strings"
 )
 
-var nonAlpha = regexp.MustCompile("[^a-z0-9]+")
+// Non-alphanumeric characters
+var nonAlphanumericChars = regexp.MustCompile("[^a-z0-9]+")
 
 func Tokenize(text string, filter *stopwords.Filter) []string {
-	words := strings.Fields((strings.ToLower(text)))
-	var result []string
+	tokens := strings.Fields((strings.ToLower(text)))
+	var filteredTokens []string
 
-	for _, word := range words {
-		word = nonAlpha.ReplaceAllString(word, "")
-		if word != "" && !filter.IsStopWord(word) {
-			result = append(result, word)
+	for _, token := range tokens {
+		// Remove non-alphanumeric characters
+		token = nonAlphanumericChars.ReplaceAllString(token, "")
+		if token != "" && !filter.IsStopWord(token) {
+			filteredTokens = append(filteredTokens, token)
 		}
 	}
 
-	return result
+	return filteredTokens
 }
