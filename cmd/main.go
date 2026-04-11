@@ -1,109 +1,180 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"sort"
+	"net/http"
+	"os"
+	"time"
 
 	"github.com/CHIRANTAN-001/zeno/internal/index"
+	"github.com/CHIRANTAN-001/zeno/internal/parser"
 	"github.com/CHIRANTAN-001/zeno/internal/search"
 	"github.com/CHIRANTAN-001/zeno/internal/stopwords"
 	"github.com/CHIRANTAN-001/zeno/internal/tokenizer"
 )
 
-type searchHit struct {
-	ID   int
-	Text string
-}
+var (
+	indexPath = "zeno_bin"
+	docsPath  = "zeno_docs"
+)
+// wikipedia file path
+const wikiDump = "./data/simplewiki-latest-pages-articles.xml.bz2"
 
 func main() {
-	// DOCUMENTS
-	docs := map[int]string{
-		1:  "The quick brown fox jumps over the lazy dog",
-		2:  "The dog barked at the cat",
-		3:  "The cat, cat chased the mouse",
-		4:  "The mouse ran away from the cat",
-		5:  "The cat caught the mouse",
-		6:  "The mouse escaped from the cat",
-		7:  "The cat chased the mouse",
-		8:  "The mouse ran away from the cat",
-		9:  "The cat caught the mouse",
-		10: "The mouse escaped from the cat",
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: ")
+		fmt.Println("  go run main.go index")
+		fmt.Println("  go run main.go search <query>")
+		return
 	}
 
-	// INIT
+	switch os.Args[1] {
+	case "index":
+		runIndexer()
+	// case "search":
+	// 	if len(os.Args) < 1 {
+	// 		fmt.Println("Usage: go run main.go search <query>")
+	// 		return
+	// 	}
+	// 	query := strings.Join(os.Args[2:], " ")
+	// 	runSearch(query)
+	case "serve":
+		runServer()
+	default:
+		fmt.Println("Unknown command:", os.Args[1])
+	}
+}
+
+func runIndexer() {
+	fmt.Println("Starting indexer...")
+
 	idx := index.NewInvertedIndex()
 	filter := stopwords.NewFilter()
+	docs := index.NewDocStore()
 
-	// BUILD INDEX
-	for id, text := range docs {
-		tokens := tokenizer.Tokenize(text, filter)
-		idx.Add(id, tokens)
+	articles, errc := parser.StreamArticles(wikiDump)
+	docID := 0
+
+	for article := range articles {
+		docID++
+		docs.Add(docID, article.Title, article.Body)
+		fullText := article.Title + " " + article.Body
+		tokens := tokenizer.Tokenize(fullText, filter)
+		idx.Add(docID, tokens)
+
+		if docID%10_000 == 0 {
+			fmt.Println("Indexed", docID, "articles")
+		}
 	}
 
-	fmt.Println("index", idx.Index)
+	if err := <-errc; err != nil {
+		fmt.Println("Parser error:", err)
+	}
 
-	// QUERY
-	query := "cat mouse"
-	queryTokens := tokenizer.Tokenize(query, filter)
+	fmt.Printf("Total articles indexed: %d\n", docID)
 
-	results := search.Search(idx, queryTokens)
+	// save both index and docs to disk
+	if err := idx.SaveToDisk(indexPath); err != nil {
+		fmt.Println("Failed to save index:", err)
+		return
+	}
+	fmt.Println("Index saved")
 
-	// BUILD HITS
-	hits := make([]searchHit, 0, len(results))
-	for _, docID := range results {
-		hits = append(hits, searchHit{
-			ID:   docID,
-			Text: docs[docID],
+	if err := docs.SaveToDisk(docsPath); err != nil {
+		fmt.Println("Failed to save docs:", err)
+		return
+	}
+
+	fmt.Println("Done. Index saved to", indexPath)
+}
+
+// func runSearch(query string) {
+// 	t0 := time.Now()
+
+// 	idx := index.NewInvertedIndex()
+// 	idx.LoadFromDisk(indexPath)
+// 	fmt.Printf("Index loaded in %v\n", time.Since(t0))
+
+// 	t1 := time.Now()
+// 	docs := index.NewDocStore()
+// 	docs.LoadFromDisk(docsPath)
+// 	fmt.Printf("Docs loaded in %v\n", time.Since(t1))
+
+// 	t2 := time.Now()
+// 	filter := stopwords.NewFilter()
+// 	queryTokens := tokenizer.Tokenize(query, filter)
+// 	results := search.Search(idx, queryTokens)
+// 	fmt.Printf("Search took %v\n", time.Since(t2))
+
+// 	fmt.Printf("\nResults for %q:\n\n", query)
+// 	for _, id := range results {
+// 		fmt.Printf("[%d] %s\n", id, docs.Get(id))
+// 	}
+// 	fmt.Printf("\n%d results found\n", len(results))
+// }
+
+func runServer() {
+	fmt.Println("Loading index...")
+	t0 := time.Now()
+
+	idx := index.NewInvertedIndex()
+	if err := idx.LoadFromDisk(indexPath); err != nil {
+		fmt.Println("Failed to load index:", err)
+		return
+	}
+
+	docs := index.NewDocStore()
+	if err := docs.LoadFromDisk(docsPath); err != nil {
+		fmt.Println("Docs not found. Run: go run main.go index")
+		return
+	}
+
+	fmt.Printf("Docs entries loaded: %d\n", len(docs.Docs))
+
+	fmt.Printf("Ready in %v — listening on http://localhost:8080\n", time.Since(t0))
+
+	filter := stopwords.NewFilter()
+
+	http.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
+		if query == "" {
+			http.Error(w, "missing ?q=", 400)
+			return
+		}
+
+		t := time.Now()
+		tokens := tokenizer.Tokenize(query, filter)
+		results := search.Search(idx, tokens)
+
+		// build response with titles
+		type Hit struct {
+			ID      int    `json:"id"`
+			Title   string `json:"title"`
+			Snippet string `json:"snippet"`
+		}
+		hits := make([]Hit, 0, len(results))
+		for _, id := range results {
+			doc := docs.Get(id)
+			snippet := doc.Body
+			if len(snippet) > 200 {
+				snippet = snippet[:200] + "..."
+			}
+			hits = append(hits, Hit{
+				ID:      id,
+				Title:   doc.Title,
+				Snippet: snippet,
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"query":   query,
+			"count":   len(results),
+			"results": hits,
+			"took_ms": time.Since(t).Milliseconds(),
 		})
-	}
-
-	// Sort results for consistent output
-	sort.Slice(hits, func(i, j int) bool {
-		return hits[i].ID < hits[j].ID
 	})
-
-	// PRINT
-	printResults(query, hits)
-	printIndex(idx.Index)
-}
-
-// DISPLAY HELPERS
-
-func printResults(query string, hits []searchHit) {
-	fmt.Println("\n================ SEARCH RESULTS ================")
-
-	fmt.Printf("\nQuery: %q\n", query)
-	fmt.Printf("\nMatched Documents (%d):\n\n", len(hits))
-
-	if len(hits) == 0 {
-		fmt.Println("No results found.")
-	} else {
-		for _, h := range hits {
-			fmt.Printf("[%d] %s\n", h.ID, h.Text)
-		}
-	}
-
-	fmt.Println("\n================================================")
-}
-
-func printIndex(idx map[string]map[int]int) {
-	fmt.Println("\n================ INVERTED INDEX ================\n")
-
-	// Sort terms for deterministic output
-	var terms []string
-	for term := range idx {
-		terms = append(terms, term)
-	}
-	sort.Strings(terms)
-
-	for _, term := range terms {
-		docIDs := make([]int, 0, len(idx[term]))
-		for id := range idx[term] {
-			docIDs = append(docIDs, id)
-		}
-		sort.Ints(docIDs)
-		fmt.Printf("%-12s -> %v\n", term, docIDs)
-	}
-
-	fmt.Println("\n================================================")
+	http.ListenAndServe(":8080", nil)
 }
