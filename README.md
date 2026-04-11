@@ -80,7 +80,7 @@ Search Engine Pipeline (High-Level Architecture):
 │                                           │                          │
 │                                           ▼                          │
 │                                   Search Results                     │
-│                                   (CLI or JSON)                      │
+│                                   (JSON API)                         │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -190,34 +190,11 @@ This will:
 
 ### Step 4 — Search!
 
-You can now search using the CLI or the HTTP server.
+You can now search using the HTTP server.
 
 ---
 
 ## 🔍 Usage
-
-### CLI Search
-
-```bash
-cd cmd
-go run main.go search "solar system"
-```
-
-Example output:
-```
-Index loaded in 12.5s
-Docs loaded in 8.2s
-Search took 1.2ms
-
-Results for "solar system":
-
-[1423] Solar System
-[5621] Planet
-[8932] Jupiter
-...
-
-42 results found
-```
 
 ### HTTP Server
 
@@ -411,10 +388,7 @@ wget -P data/ https://dumps.wikimedia.org/simplewiki/latest/simplewiki-latest-pa
 cd cmd
 go run main.go index
 
-# 4a. Test via CLI
-go run main.go search "albert einstein"
-
-# 4b. Test via HTTP
+# 4. Start the HTTP server and search
 go run main.go serve
 # In another terminal:
 curl "http://localhost:8080/search?q=albert+einstein"
@@ -425,7 +399,6 @@ curl "http://localhost:8080/search?q=albert+einstein"
 | Step | Output |
 |---|---|
 | **Indexing** | Prints `Indexed 10000 articles`, `Indexed 20000 articles`, ... until done |
-| **CLI search** | Shows index/docs load time, search time, and matching article titles |
 | **HTTP search** | Returns JSON with `query`, `count`, `results` array, and `took_ms` |
 
 ---
