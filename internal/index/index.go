@@ -1,5 +1,10 @@
 package index
 
+import (
+	"encoding/gob"
+	"os"
+)
+
 type InvertedIndex struct {
 	Index map[string]map[int]int
 }
@@ -17,4 +22,22 @@ func (idx *InvertedIndex) Add(docID int, tokens []string) {
 		}
 		idx.Index[token][docID] = idx.Index[token][docID] + 1
 	}
+}
+
+func (idx *InvertedIndex) SaveToDisk(path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return gob.NewEncoder(f).Encode(idx.Index)
+}
+
+func (idx *InvertedIndex) LoadFromDisk(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return  err
+	}
+	defer f.Close()
+	return gob.NewDecoder(f).Decode(&idx.Index)
 }
